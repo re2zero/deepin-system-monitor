@@ -337,6 +337,9 @@ QVariantMap SystemDBusServer::getProcessInfoBatch(const QList<int> &pids)
                 QSet<int> targetPids;
                 QVariantMap *processData;
                 SystemDBusServer *server;
+                // 用于存储dkapture数据以进行对比
+                QMap<int, ProcPidStat> dkStatData;
+                QMap<int, ProcPidStatm> dkStatmData;
             } context;
             
             context.targetPids = QSet<int>(pids.begin(), pids.end());
@@ -356,14 +359,16 @@ QVariantMap SystemDBusServer::getProcessInfoBatch(const QList<int> &pids)
                     return 0;
                 }
                 
-                QString pidKey = QString::number(hdr->pid);
+                // 对于子线程，将数据合并到主线程中
+                bool isThread = (hdr->pid != hdr->tgid);
+                QString pidKey = isThread ? QString::number(hdr->tgid) : QString::number(hdr->pid);
                 QVariantMap pidData;
                 
                 // 如果已有此 PID 的数据，则获取它
                 if (context->processData->contains(pidKey)) {
                     pidData = context->processData->value(pidKey).toMap();
                 } else {
-                    pidData["pid"] = hdr->pid;
+                    pidData["pid"] = isThread ? hdr->tgid : hdr->pid;
                     pidData["tgid"] = hdr->tgid;
                     pidData["comm"] = QString::fromUtf8(hdr->comm, TASK_COMM_LEN);
                 }
@@ -378,46 +383,73 @@ QVariantMap SystemDBusServer::getProcessInfoBatch(const QList<int> &pids)
                         const ProcPidStat *stat = reinterpret_cast<const ProcPidStat *>(payload);
                         // qCDebug(app) << "SystemServer: STAT raw data - vsize:" << stat->vsize << "rss:" << stat->rss;
     
-
-                        pidData["state"] = stat->state;
-                        pidData["ppid"] = stat->ppid;
-                        
-                        // 恢复增量计算处理DKapture的累积CPU时间数据
-                        qulonglong deltaUtime = context->server->calculateDelta(hdr->pid, "utime", stat->utime);
-                        qulonglong deltaStime = context->server->calculateDelta(hdr->pid, "stime", stat->stime);
-                        qulonglong deltaCutime = context->server->calculateDelta(hdr->pid, "cutime", stat->cutime);
-                        qulonglong deltaCstime = context->server->calculateDelta(hdr->pid, "cstime", stat->cstime);
-                        
-                        // 使用新的转换公式：值 / (每秒纳秒数 * sysconf(_SC_CLK_TCK))
-                        static const qulonglong NANOS_PER_SECOND = 1000000000ULL; // 1秒 = 10^9 纳秒
-                        static const long CLK_TCK = sysconf(_SC_CLK_TCK);
-                        static const qulonglong CONVERSION_FACTOR = NANOS_PER_SECOND * CLK_TCK;
-                        
-                        qulonglong utimeTicks = deltaUtime / CONVERSION_FACTOR;
-                        qulonglong stimeTicks = deltaStime / CONVERSION_FACTOR;
-                        qulonglong cutimeTicks = deltaCutime / CONVERSION_FACTOR;
-                        qulonglong cstimeTicks = deltaCstime / CONVERSION_FACTOR;
-
-                        // // 添加合理性检查，防止异常大的CPU值（例如超过1000 ticks认为是异常）
-                        // static const qulonglong MAX_REASONABLE_CPU_TICKS = 1000;
-                        // if (utimeTicks > MAX_REASONABLE_CPU_TICKS) utimeTicks = 0;
-                        // if (stimeTicks > MAX_REASONABLE_CPU_TICKS) stimeTicks = 0;
-                        // if (cutimeTicks > MAX_REASONABLE_CPU_TICKS) cutimeTicks = 0;
-                        // if (cstimeTicks > MAX_REASONABLE_CPU_TICKS) cstimeTicks = 0;
-                        
-                        pidData["utime"] = utimeTicks;
-                        pidData["stime"] = stimeTicks;
-                        pidData["cutime"] = cutimeTicks;
-                        pidData["cstime"] = cstimeTicks;
-                        pidData["cpu_time"] = utimeTicks + stimeTicks;
-                        
-
-                        pidData["priority"] = stat->priority;
-                        pidData["nice"] = stat->nice;
-                        pidData["num_threads"] = stat->num_threads;
-                        pidData["start_time"] = static_cast<qulonglong>(stat->start_time);
-                        pidData["vsize"] = static_cast<qulonglong>(stat->vsize);
-                        pidData["rss"] = static_cast<qulonglong>(stat->rss);
+                        // 保存dkapture数据以进行对比（只保存主线程的数据）
+                        if (!isThread) {
+                            context->dkStatData[hdr->pid] = *stat;
+                        }
+    
+                        // 对于子线程，只累加CPU时间；对于主线程，更新所有字段
+                        if (isThread) {
+                            // 累加CPU时间到主线程
+                            qulonglong deltaUtime = context->server->calculateDelta(hdr->pid, "utime", stat->utime);
+                            qulonglong deltaStime = context->server->calculateDelta(hdr->pid, "stime", stat->stime);
+                            qulonglong deltaCutime = context->server->calculateDelta(hdr->pid, "cutime", stat->cutime);
+                            qulonglong deltaCstime = context->server->calculateDelta(hdr->pid, "cstime", stat->cstime);
+                            
+                            // 使用新的转换公式：值 / (每秒纳秒数 * sysconf(_SC_CLK_TCK))
+                            static const qulonglong NANOS_PER_SECOND = 1000000000ULL; // 1秒 = 10^9 纳秒
+                            static const long CLK_TCK = sysconf(_SC_CLK_TCK);
+                            static const qulonglong CONVERSION_FACTOR = NANOS_PER_SECOND * CLK_TCK;
+                            
+                            qulonglong utimeTicks = deltaUtime / CONVERSION_FACTOR;
+                            qulonglong stimeTicks = deltaStime / CONVERSION_FACTOR;
+                            qulonglong cutimeTicks = deltaCutime / CONVERSION_FACTOR;
+                            qulonglong cstimeTicks = deltaCstime / CONVERSION_FACTOR;
+                            
+                            // 累加到主线程数据
+                            pidData["utime"] = pidData["utime"].toULongLong() + utimeTicks;
+                            pidData["stime"] = pidData["stime"].toULongLong() + stimeTicks;
+                            pidData["cutime"] = pidData["cutime"].toULongLong() + cutimeTicks;
+                            pidData["cstime"] = pidData["cstime"].toULongLong() + cstimeTicks;
+                            pidData["cpu_time"] = pidData["cpu_time"].toULongLong() + utimeTicks + stimeTicks;
+                            
+                            // 累加内存相关字段
+                            pidData["vsize"] = pidData["vsize"].toULongLong() + static_cast<qulonglong>(stat->vsize);
+                            pidData["rss"] = pidData["rss"].toULongLong() + static_cast<qulonglong>(stat->rss);
+                        } else {
+                            // 主线程，更新所有字段
+                            pidData["state"] = stat->state;
+                            pidData["ppid"] = stat->ppid;
+                            
+                            // 恢复增量计算处理DKapture的累积CPU时间数据
+                            qulonglong deltaUtime = context->server->calculateDelta(hdr->pid, "utime", stat->utime);
+                            qulonglong deltaStime = context->server->calculateDelta(hdr->pid, "stime", stat->stime);
+                            qulonglong deltaCutime = context->server->calculateDelta(hdr->pid, "cutime", stat->cutime);
+                            qulonglong deltaCstime = context->server->calculateDelta(hdr->pid, "cstime", stat->cstime);
+                            
+                            // 使用新的转换公式：值 / (每秒纳秒数 * sysconf(_SC_CLK_TCK))
+                            static const qulonglong NANOS_PER_SECOND = 1000000000ULL; // 1秒 = 10^9 纳秒
+                            static const long CLK_TCK = sysconf(_SC_CLK_TCK);
+                            static const qulonglong CONVERSION_FACTOR = NANOS_PER_SECOND * CLK_TCK;
+                            
+                            qulonglong utimeTicks = deltaUtime / CONVERSION_FACTOR;
+                            qulonglong stimeTicks = deltaStime / CONVERSION_FACTOR;
+                            qulonglong cutimeTicks = deltaCutime / CONVERSION_FACTOR;
+                            qulonglong cstimeTicks = deltaCstime / CONVERSION_FACTOR;
+                            
+                            pidData["utime"] = utimeTicks;
+                            pidData["stime"] = stimeTicks;
+                            pidData["cutime"] = cutimeTicks;
+                            pidData["cstime"] = cstimeTicks;
+                            pidData["cpu_time"] = utimeTicks + stimeTicks;
+                            
+                            pidData["priority"] = stat->priority;
+                            pidData["nice"] = stat->nice;
+                            pidData["num_threads"] = stat->num_threads;
+                            pidData["start_time"] = static_cast<qulonglong>(stat->start_time);
+                            pidData["vsize"] = static_cast<qulonglong>(stat->vsize);
+                            pidData["rss"] = static_cast<qulonglong>(stat->rss);
+                        }
                         break;
                     }
                     case DKapture::PROC_PID_IO: {
@@ -429,13 +461,24 @@ QVariantMap SystemDBusServer::getProcessInfoBatch(const QList<int> &pids)
                         qulonglong deltaWriteBytes = context->server->calculateDelta(hdr->pid, "write_bytes", io->write_bytes);
                         qulonglong deltaCancelledWriteBytes = context->server->calculateDelta(hdr->pid, "cancelled_write_bytes", io->cancelled_write_bytes);
                         
-                        pidData["rchar"] = static_cast<qulonglong>(io->rchar);
-                        pidData["wchar"] = static_cast<qulonglong>(io->wchar);
-                        pidData["syscr"] = static_cast<qulonglong>(io->syscr);
-                        pidData["syscw"] = static_cast<qulonglong>(io->syscw);
-                        pidData["read_bytes"] = deltaReadBytes;
-                        pidData["write_bytes"] = deltaWriteBytes;
-                        pidData["cancelled_write_bytes"] = deltaCancelledWriteBytes;
+                        // 对于子线程，累加IO数据到主线程；对于主线程，直接更新
+                        if (isThread) {
+                            pidData["rchar"] = pidData["rchar"].toULongLong() + static_cast<qulonglong>(io->rchar);
+                            pidData["wchar"] = pidData["wchar"].toULongLong() + static_cast<qulonglong>(io->wchar);
+                            pidData["syscr"] = pidData["syscr"].toULongLong() + static_cast<qulonglong>(io->syscr);
+                            pidData["syscw"] = pidData["syscw"].toULongLong() + static_cast<qulonglong>(io->syscw);
+                            pidData["read_bytes"] = pidData["read_bytes"].toULongLong() + deltaReadBytes;
+                            pidData["write_bytes"] = pidData["write_bytes"].toULongLong() + deltaWriteBytes;
+                            pidData["cancelled_write_bytes"] = pidData["cancelled_write_bytes"].toULongLong() + deltaCancelledWriteBytes;
+                        } else {
+                            pidData["rchar"] = static_cast<qulonglong>(io->rchar);
+                            pidData["wchar"] = static_cast<qulonglong>(io->wchar);
+                            pidData["syscr"] = static_cast<qulonglong>(io->syscr);
+                            pidData["syscw"] = static_cast<qulonglong>(io->syscw);
+                            pidData["read_bytes"] = deltaReadBytes;
+                            pidData["write_bytes"] = deltaWriteBytes;
+                            pidData["cancelled_write_bytes"] = deltaCancelledWriteBytes;
+                        }
                         break;
                     }
                     case DKapture::PROC_PID_STATM: {
@@ -443,12 +486,25 @@ QVariantMap SystemDBusServer::getProcessInfoBatch(const QList<int> &pids)
                         const ProcPidStatm *statm = reinterpret_cast<const ProcPidStatm *>(payload);
                         // qCDebug(app) << "SystemServer: STATM raw data - size:" << statm->size << "resident:" << statm->resident << "shared:" << statm->shared;
     
-
-                        pidData["memory_size"] = static_cast<qulonglong>(statm->size);
-                        pidData["memory_resident"] = static_cast<qulonglong>(statm->resident);
-                        pidData["memory_shared"] = static_cast<qulonglong>(statm->shared);
-                        pidData["memory_text"] = static_cast<qulonglong>(statm->text);
-                        pidData["memory_data"] = static_cast<qulonglong>(statm->data);
+                        // 保存dkapture数据以进行对比（只保存主线程的数据）
+                        if (!isThread) {
+                            context->dkStatmData[hdr->pid] = *statm;
+                        }
+    
+                        // 对于子线程，累加内存数据到主线程；对于主线程，直接更新
+                        if (isThread) {
+                            pidData["memory_size"] = pidData["memory_size"].toULongLong() + static_cast<qulonglong>(statm->size);
+                            pidData["memory_resident"] = pidData["memory_resident"].toULongLong() + static_cast<qulonglong>(statm->resident);
+                            pidData["memory_shared"] = pidData["memory_shared"].toULongLong() + static_cast<qulonglong>(statm->shared);
+                            pidData["memory_text"] = pidData["memory_text"].toULongLong() + static_cast<qulonglong>(statm->text);
+                            pidData["memory_data"] = pidData["memory_data"].toULongLong() + static_cast<qulonglong>(statm->data);
+                        } else {
+                            pidData["memory_size"] = static_cast<qulonglong>(statm->size);
+                            pidData["memory_resident"] = static_cast<qulonglong>(statm->resident);
+                            pidData["memory_shared"] = static_cast<qulonglong>(statm->shared);
+                            pidData["memory_text"] = static_cast<qulonglong>(statm->text);
+                            pidData["memory_data"] = static_cast<qulonglong>(statm->data);
+                        }
                         break;
                     }
                     case DKapture::PROC_PID_traffic: {
@@ -474,6 +530,22 @@ QVariantMap SystemDBusServer::getProcessInfoBatch(const QList<int> &pids)
             
             // qCDebug(app) << "SystemServer: DKapture read returned" << bytesRead << "bytes";
             qCDebug(app) << "SystemServer: Process data collected for" << processData.size() << "processes";
+            
+            // 对每个主线程调用compareDKaptureWithProc进行数据对比
+            for (auto it = context.dkStatData.constBegin(); it != context.dkStatData.constEnd(); ++it) {
+                int pid = it.key();
+                const ProcPidStat &dkStat = it.value();
+                
+                // 查找对应的STATM数据
+                const ProcPidStatm *dkStatm = nullptr;
+                auto statmIt = context.dkStatmData.find(pid);
+                if (statmIt != context.dkStatmData.end()) {
+                    dkStatm = &statmIt.value();
+                }
+                
+                // 调用compareDKaptureWithProc进行数据对比
+                context.server->compareDKaptureWithProc(pid, dkStatm, &dkStat);
+            }
             
             if (bytesRead >= 0) {
                 result["success"] = true;
@@ -584,7 +656,7 @@ void SystemDBusServer::resetProcessDeltaData(int pid)
 
 void SystemDBusServer::compareDKaptureWithProc(int pid, const ProcPidStatm* dkStatm, const ProcPidStat* dkStat)
 {
-    qCInfo(app) << "================ DKapture vs /proc Comparison for PID" << pid << "================";
+    // qCInfo(app) << "================ DKapture vs /proc Comparison for PID" << pid << "================";
     
     // 读取/proc文件
     QString statPath = QString("/proc/%1/stat").arg(pid);
@@ -598,6 +670,8 @@ void SystemDBusServer::compareDKaptureWithProc(int pid, const ProcPidStatm* dkSt
         return;
     }
     
+    bool hasAnomaly = false;
+    
     // 读取并解析/proc/pid/stat
     if (dkStat) {
         QString statContent = statFile.readAll().trimmed();
@@ -609,11 +683,47 @@ void SystemDBusServer::compareDKaptureWithProc(int pid, const ProcPidStatm* dkSt
             qulonglong procVsize = statFields[22].toULongLong();
             qlonglong procRss = statFields[23].toLongLong();
             
-            qCInfo(app) << "STAT comparison:";
-            qCInfo(app) << "  DKapture utime:" << dkStat->utime << "  /proc utime:" << procUtime << "  diff:" << (qint64(dkStat->utime) - qint64(procUtime));
-            qCInfo(app) << "  DKapture stime:" << dkStat->stime << "  /proc stime:" << procStime << "  diff:" << (qint64(dkStat->stime) - qint64(procStime));
-            qCInfo(app) << "  DKapture vsize:" << dkStat->vsize << "  /proc vsize:" << procVsize << "  diff:" << (qint64(dkStat->vsize) - qint64(procVsize));
-            qCInfo(app) << "  DKapture rss:" << dkStat->rss << "    /proc rss:" << (procRss * 4096) << "  diff:" << (qint64(dkStat->rss) - qint64(procRss * 4096));
+            // 使用增量计算处理DKapture的累积CPU时间数据
+            qulonglong deltaUtime = calculateDelta(pid, "utime", dkStat->utime);
+            qulonglong deltaStime = calculateDelta(pid, "stime", dkStat->stime);
+            
+            // 使用新的转换公式：值 / (每秒纳秒数 * sysconf(_SC_CLK_TCK))
+            static const qulonglong NANOS_PER_SECOND = 1000000000ULL; // 1秒 = 10^9 纳秒
+            static const long CLK_TCK = sysconf(_SC_CLK_TCK);
+            static const qulonglong CONVERSION_FACTOR = NANOS_PER_SECOND * CLK_TCK;
+            
+            qulonglong dkUtimeTicks = deltaUtime / CONVERSION_FACTOR;
+            qulonglong dkStimeTicks = deltaStime / CONVERSION_FACTOR;
+            
+            qint64 utimeDiff = qint64(dkUtimeTicks) - qint64(procUtime);
+            qint64 stimeDiff = qint64(dkStimeTicks) - qint64(procStime);
+            qint64 vsizeDiff = qint64(dkStat->vsize) - qint64(procVsize);
+            qint64 rssDiff = qint64(dkStat->rss) - qint64(procRss * 4096);
+            
+            // 检查CPU时间差异是否异常（超过1000000认为异常）
+            if (qAbs(utimeDiff) > 1000000 || qAbs(stimeDiff) > 1000000) {
+                hasAnomaly = true;
+                qCWarning(app) << "CPU time anomaly detected for PID" << pid << ":";
+                qCWarning(app) << "  DKapture utime:" << dkUtimeTicks << "  /proc utime:" << procUtime << "  diff:" << utimeDiff;
+                qCWarning(app) << "  DKapture stime:" << dkStimeTicks << "  /proc stime:" << procStime << "  diff:" << stimeDiff;
+            }
+            
+            // 检查内存大小差异是否异常（超过100MB认为异常）
+            if (qAbs(vsizeDiff) > 100 * 1024 * 1024 || qAbs(rssDiff) > 100 * 1024 * 1024) {
+                hasAnomaly = true;
+                qCWarning(app) << "Memory size anomaly detected for PID" << pid << ":";
+                qCWarning(app) << "  DKapture vsize:" << dkStat->vsize << "  /proc vsize:" << procVsize << "  diff:" << vsizeDiff;
+                qCWarning(app) << "  DKapture rss:" << dkStat->rss << "    /proc rss:" << (procRss * 4096) << "  diff:" << rssDiff;
+            }
+            
+            // 如果有差异但不异常，仍然输出调试信息
+            if (!hasAnomaly && (utimeDiff != 0 || stimeDiff != 0 || vsizeDiff != 0 || rssDiff != 0)) {
+                qCDebug(app) << "STAT comparison for PID" << pid << ":";
+                qCDebug(app) << "  DKapture utime:" << dkUtimeTicks << "  /proc utime:" << procUtime << "  diff:" << utimeDiff;
+                qCDebug(app) << "  DKapture stime:" << dkStimeTicks << "  /proc stime:" << procStime << "  diff:" << stimeDiff;
+                qCDebug(app) << "  DKapture vsize:" << dkStat->vsize << "  /proc vsize:" << procVsize << "  diff:" << vsizeDiff;
+                qCDebug(app) << "  DKapture rss:" << dkStat->rss << "    /proc rss:" << (procRss * 4096) << "  diff:" << rssDiff;
+            }
         }
     }
     
@@ -627,13 +737,32 @@ void SystemDBusServer::compareDKaptureWithProc(int pid, const ProcPidStatm* dkSt
             qulonglong procResident = statmFields[1].toULongLong();
             qulonglong procShared = statmFields[2].toULongLong();
             
-            qCInfo(app) << "STATM comparison:";
-            qCInfo(app) << "  DKapture size:" << dkStatm->size << "     /proc size:" << procSize << "     diff:" << (qint64(dkStatm->size) - qint64(procSize));
-            qCInfo(app) << "  DKapture resident:" << dkStatm->resident << " /proc resident:" << procResident << " diff:" << (qint64(dkStatm->resident) - qint64(procResident));
-            qCInfo(app) << "  DKapture shared:" << dkStatm->shared << "   /proc shared:" << procShared << "   diff:" << (qint64(dkStatm->shared) - qint64(procShared));
+            qint64 sizeDiff = qint64(dkStatm->size) - qint64(procSize);
+            qint64 residentDiff = qint64(dkStatm->resident) - qint64(procResident);
+            qint64 sharedDiff = qint64(dkStatm->shared) - qint64(procShared);
+            
+            // 检查内存大小差异是否异常（超过100MB认为异常）
+            if (qAbs(sizeDiff) > 100 * 1024 * 1024 || qAbs(residentDiff) > 100 * 1024 * 1024 || qAbs(sharedDiff) > 100 * 1024 * 1024) {
+                hasAnomaly = true;
+                qCWarning(app) << "Memory size anomaly detected for PID" << pid << " (statm):";
+                qCWarning(app) << "  DKapture size:" << dkStatm->size << "     /proc size:" << procSize << "     diff:" << sizeDiff;
+                qCWarning(app) << "  DKapture resident:" << dkStatm->resident << " /proc resident:" << procResident << " diff:" << residentDiff;
+                qCWarning(app) << "  DKapture shared:" << dkStatm->shared << "   /proc shared:" << procShared << "   diff:" << sharedDiff;
+            }
+            
+            // 如果有差异但不异常，仍然输出调试信息
+            if (!hasAnomaly && (sizeDiff != 0 || residentDiff != 0 || sharedDiff != 0)) {
+                qCDebug(app) << "STATM comparison for PID" << pid << ":";
+                qCDebug(app) << "  DKapture size:" << dkStatm->size << "     /proc size:" << procSize << "     diff:" << sizeDiff;
+                qCDebug(app) << "  DKapture resident:" << dkStatm->resident << " /proc resident:" << procResident << " diff:" << residentDiff;
+                qCDebug(app) << "  DKapture shared:" << dkStatm->shared << "   /proc shared:" << procShared << "   diff:" << sharedDiff;
+            }
         }
     }
     
-    qCInfo(app) << "================================================================";
+    // 如果检测到异常，输出警告信息
+    if (hasAnomaly) {
+        qCWarning(app) << "Data anomaly detected for PID" << pid << "================";
+    }
 }
 #endif
