@@ -8,11 +8,14 @@
 #include "mem_detail_view_widget.h"
 #include "netif_detail_view_widget.h"
 #include "block_dev_detail_view_widget.h"
+#include "../system/gpu_backend.h"
+#include "gpu_detail_view_widget.h"
 #include "ddlog.h"
 
 #include <DMenu>
 #include <DApplication>
 #include <QActionGroup>
+#include <QLabel>
 
 using namespace DDLog;
 
@@ -125,6 +128,16 @@ void DetailViewStackedWidget::onDbusSendMsgChangeDetailInfoWidget(QString msgCod
             qCDebug(app) << "Setting current widget to Disk detail widget";
             this->setCurrent(m_blockDevDetailWidget);
         }
+        return;
+    }
+
+    if (msgCode.compare(QString("MSG_GPU"), Qt::CaseInsensitive) == 0) {
+        qCDebug(app) << "Switching to GPU page";
+        if (m_gpudetailWidget == nullptr) {
+            m_gpudetailWidget = new GpuDetailViewWidget(this);
+            this->insertWidget(5, m_gpudetailWidget);
+        }
+        this->setCurrent(m_gpudetailWidget);
         return;
     }
 }

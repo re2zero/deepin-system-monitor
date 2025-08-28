@@ -14,6 +14,7 @@ class CompactCpuMonitor;
 class CompactMemoryMonitor;
 class CompactNetworkMonitor;
 class CompactDiskMonitor;
+class CompactGpuMonitor;
 
 /**
  * @brief Compact view frame
@@ -53,6 +54,8 @@ private:
     CompactNetworkMonitor *m_networkMonitor {};
     // Compact disk view instance
     CompactDiskMonitor *m_diskMonitor {};
+    // Compact gpu view instance
+    CompactGpuMonitor *m_gpuMonitor {};
 };
 
 #endif  // MONITOR_COMPACT_VIEW_H

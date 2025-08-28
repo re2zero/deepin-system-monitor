@@ -72,7 +72,7 @@ install(FILES ./misc/deepin-system-monitor-system-server.service DESTINATION ${C
 # Polkit; Update translation
 set(POLICY_FILE org.deepin.deepin-system-monitor-system-server.policy)
 find_program(POLICY_TS_CONV deepin-policy-ts-convert REQUIRED)
-add_custom_target(APP_POLICY_FILE_TEST
+add_custom_target(SYSTEM_SERVER_POLICY_FILE
     ALL
     COMMAND ${POLICY_TS_CONV} ts2policy ${CMAKE_CURRENT_SOURCE_DIR}/misc/${POLICY_FILE} ${CMAKE_CURRENT_SOURCE_DIR}/translations/policy/ ${POLICY_FILE}.tmp
     COMMAND mv ${POLICY_FILE}.tmp ${CMAKE_CURRENT_SOURCE_DIR}/misc/${POLICY_FILE}

@@ -15,6 +15,7 @@
 class MemDetailViewWidget;
 class NetifDetailViewWidget;
 class BlockDevDetailViewWidget;
+class GpuDetailViewWidget;
 
 DWIDGET_USE_NAMESPACE
 class DetailViewStackedWidget : public AnimationStackedWidget
@@ -41,6 +42,7 @@ private:
 
     QWidget *m_processWidget = nullptr;
     QWidget *m_cpudetailWidget = nullptr;
+    QWidget *m_gpudetailWidget = nullptr;
     QWidget *m_memDetailWidget = nullptr;
     QWidget *m_netifDetailWidget = nullptr;
     QWidget *m_blockDevDetailWidget = nullptr;

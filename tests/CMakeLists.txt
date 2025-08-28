@@ -357,6 +357,7 @@ set(HPP_SYSTEM
     ${CMAKE_HOME_DIRECTORY}/${PROJECT_NAME}-main/system/wireless.h
     ${CMAKE_HOME_DIRECTORY}/${PROJECT_NAME}-main/system/diskio_info.h
     ${CMAKE_HOME_DIRECTORY}/${PROJECT_NAME}-main/system/net_info.h
+    ${CMAKE_HOME_DIRECTORY}/${PROJECT_NAME}-main/system/gpu.h
 )
 
 set(CPP_SYSTEM
@@ -385,6 +386,7 @@ set(CPP_SYSTEM
     ${CMAKE_HOME_DIRECTORY}/${PROJECT_NAME}-main/system/wireless.cpp
     ${CMAKE_HOME_DIRECTORY}/${PROJECT_NAME}-main/system/diskio_info.cpp
     ${CMAKE_HOME_DIRECTORY}/${PROJECT_NAME}-main/system/net_info.cpp
+    ${CMAKE_HOME_DIRECTORY}/${PROJECT_NAME}-main/system/gpu.cpp
 )
 
 set(HPP_WM

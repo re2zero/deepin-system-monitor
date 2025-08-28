@@ -84,6 +84,7 @@ set(HPP_GLOBAL
     compact_memory_monitor.h
     compact_network_monitor.h
     compact_disk_monitor.h
+    compact_gpu_monitor.h
     smooth_curve_generator.h
     settings.h
     detailwidgetmanager.h
@@ -100,6 +101,7 @@ set(CPP_GLOBAL
     compact_memory_monitor.cpp
     compact_network_monitor.cpp
     compact_disk_monitor.cpp
+    compact_gpu_monitor.cpp
     smooth_curve_generator.cpp
     settings.cpp
     detailwidgetmanager.cpp
@@ -234,6 +236,10 @@ set(HPP_GUI
     gui/block_dev_stat_view_widget.h
     gui/animation_stackedwidget.h
     gui/cpu_detail_widget.h
+    gui/gpu_detail_view_widget.h
+    gui/gpu_engine_chart_widget.h
+    gui/gpu_engine_grid_widget.h
+    gui/gpu_detail_summary_widget.h
     gui/cpu_summary_view_widget.h
     gui/block_dev_item_widget.h
     gui/dialog/systemprotectionsetting.h
@@ -279,6 +285,10 @@ set(CPP_GUI
     gui/chart_view_widget.cpp
     gui/animation_stackedwidget.cpp
     gui/cpu_detail_widget.cpp
+    gui/gpu_detail_view_widget.cpp
+    gui/gpu_engine_chart_widget.cpp
+    gui/gpu_engine_grid_widget.cpp
+    gui/gpu_detail_summary_widget.cpp
     gui/cpu_summary_view_widget.cpp
     gui/block_dev_item_widget.cpp
     gui/block_dev_stat_view_widget.cpp
@@ -366,6 +376,11 @@ set(HPP_SYSTEM
     system/wireless.h
     system/diskio_info.h
     system/net_info.h
+    system/gpu.h
+    system/gpu_backend.h
+    system/gpu_backend_nvidia.h
+    system/gpu_backend_amd.h
+    system/gpu_backend_intel.h
 )
 set(CPP_SYSTEM
     system/system_monitor.cpp
@@ -393,6 +408,11 @@ set(CPP_SYSTEM
     system/wireless.cpp
     system/diskio_info.cpp
     system/net_info.cpp
+    system/gpu.cpp
+    system/gpu_backend.cpp
+    system/gpu_backend_nvidia.cpp
+    system/gpu_backend_amd.cpp
+    system/gpu_backend_intel.cpp
 )
 
 set(HPP_WM
@@ -619,6 +639,18 @@ add_executable(${PROJECT_NAME}
 
 target_link_libraries(${PROJECT_NAME} ${LIBS})
 
+# Developer tool: gpu-probe (for local verification of GPU backend)
+add_executable(gpu-probe
+    system/gpu.cpp
+    tools/gpu_probe.cpp
+)
+target_include_directories(gpu-probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(gpu-probe ${QT_NS}::Core)
+
+# Plain C probe without Qt (for environments where Qt I/O may block)
+add_executable(gpu-probe-plain
+    tools/gpu_probe_standalone.c
+)
 install(TARGETS ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES ${APP_QM_FILES} DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/translations)
 install(FILES translations/policy/${POLICY_FILE} DESTINATION ${CMAKE_INSTALL_DATADIR}/polkit-1/actions)

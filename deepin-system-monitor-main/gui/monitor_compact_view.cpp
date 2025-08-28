@@ -9,6 +9,7 @@
 #include "compact_disk_monitor.h"
 #include "compact_memory_monitor.h"
 #include "compact_network_monitor.h"
+#include "compact_gpu_monitor.h"
 #include "detailwidgetmanager.h"
 #include "ddlog.h"
 
@@ -39,6 +40,8 @@ MonitorCompactView::MonitorCompactView(QWidget *parent)
     m_networkMonitor = new CompactNetworkMonitor(this);
     // disk monitor view instance
     m_diskMonitor = new CompactDiskMonitor(this);
+    // gpu monitor view instance
+    m_gpuMonitor = new CompactGpuMonitor(this);
 
     // vertical layout to hold monitor instances
     QVBoxLayout *layout = new QVBoxLayout(this);
@@ -56,6 +59,8 @@ MonitorCompactView::MonitorCompactView(QWidget *parent)
     layout->addWidget(m_networkMonitor, 0, Qt::AlignHCenter);
     layout->addStretch(2);
     layout->addWidget(m_diskMonitor, 0, Qt::AlignHCenter);
+    layout->addStretch(2);
+    layout->addWidget(m_gpuMonitor, 0, Qt::AlignHCenter);
     layout->addStretch(1);
 
     // set frame layout
@@ -73,6 +78,7 @@ MonitorCompactView::MonitorCompactView(QWidget *parent)
     connect(m_memoryMonitor, &CompactMemoryMonitor::clicked, &DetailWidgetManager::getInstance(), &DetailWidgetManager::jumpDetailWidget);
     connect(m_networkMonitor, &CompactNetworkMonitor::clicked, &DetailWidgetManager::getInstance(), &DetailWidgetManager::jumpDetailWidget);
     connect(m_diskMonitor, &CompactDiskMonitor::clicked, &DetailWidgetManager::getInstance(), &DetailWidgetManager::jumpDetailWidget);
+    connect(m_gpuMonitor, &CompactGpuMonitor::clicked, &DetailWidgetManager::getInstance(), &DetailWidgetManager::jumpDetailWidget);
 }
 
 void MonitorCompactView::setDetailButtonVisible(bool visible)
