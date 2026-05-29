@@ -88,6 +88,11 @@ jobs:
           cmake --install .
           echo "✅ polkit-qt-1 (Qt6) built and installed from source"
 
+      - name: Install dde-tray-loader build dependencies
+        run: |
+          # KF6WindowSystem required by dde-tray-loader/plugins/application-tray
+          pacman -Syu --noconfirm --noprogressbar kf6-windowsystem
+
       - name: Build and Install dde-tray-loader
         run: |
           # From debian/control: dde-tray-loader-dev | dde-dock-dev
